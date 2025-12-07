@@ -4,4 +4,4 @@ numpy
 plotly
 streamlit-echarts
 yfinance
-streamlit-pwa
+
