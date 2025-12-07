@@ -1,6 +1,3 @@
-from pwa import inject_pwa
-inject_pwa()
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -273,4 +270,5 @@ else:
         # On sélectionne quelques colonnes clés pour l'affichage tableau
         cols_to_show = ['price', 'sc_fair_value', 'growth_est', 'pe_5y']
         existing_cols = [c for c in cols_to_show if c in df.columns]
+
         st.dataframe(df[existing_cols])
