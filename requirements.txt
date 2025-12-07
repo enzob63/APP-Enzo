@@ -2,19 +2,18 @@
 streamlit==1.27.1
 
 # Data handling
-pandas==2.3.3
-numpy==2.3.5
+pandas
 
-# Visualisation
-plotly==6.5.0
-streamlit-echarts==0.4.0
-altair==5.5.0
+# Visualization
+plotly
+streamlit-echarts
+altair
 
 # Finance API
-yfinance==0.2.66
+yfinance
 
 # Image handling (Streamlit dependency)
-pillow>=10.0.0
+pillow
 
 # Optional utilities
-rich==14.2.0
+# Rich is already a dependency of Streamlit, pas besoin de fixer la version
