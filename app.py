@@ -10,9 +10,9 @@ import yfinance as yf
 from datetime import datetime
 
 # ==============================================================================
-# 1. CONFIGURATION & STYLE SYSTEM V32
+# 1. CONFIGURATION & STYLE SYSTEM (IDENTIQUE V32)
 # ==============================================================================
-st.set_page_config(page_title="AppEnzo V32", layout="wide", page_icon="🐰")
+st.set_page_config(page_title="AppEnzo V33", layout="wide", page_icon="🐰")
 
 # LOGO SVG (Lapin Couronné)
 SVG_LOGO = """
@@ -50,6 +50,7 @@ st.markdown("""
         -webkit-background-clip: text; -webkit-text-fill-color: transparent;
         margin: 0; text-transform: uppercase;
     }
+    [data-testid="stHeader"] { display: none; }
 
     /* INPUTS */
     .stTextInput>div>div>input, .stNumberInput>div>div>input, .stSelectbox>div>div>div {
@@ -103,9 +104,9 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 2. DATA ENGINE (CORRIGÉ : MULTI-LIGNES)
+# 2. DATA ENGINE (CORRIGÉ : AÉRÉ POUR EVITER L'ERREUR)
 # ==============================================================================
-DATA_FILE = "appenzo_v32.json"
+DATA_FILE = "appenzo_v33.json"
 
 def load_db():
     if not os.path.exists(DATA_FILE):
@@ -158,10 +159,13 @@ def fetch_data(ticker):
             'pe_target': info.get('forwardPE', 20.0),
             'shares_owned': 0.0, 'sc_fair_value': 0.0
         }
-        for k,v in data.items(): 
+        
+        for k,v in data.items():
             if v is None: data[k] = 0.0
+            
         return data
-    except: return None
+    except:
+        return None
 
 def get_logo_html(domain, size=40):
     if not domain: return ""
@@ -191,15 +195,14 @@ def get_score(d):
     return min(p, 20)
 
 def calc_cagr_net(d):
-    p0 = d.get('price', 100)
+    p0 = d.get('price', 100); eps0 = d.get('eps_ttm', 1)
     if p0 <= 0: return 0
-    eps0 = d.get('eps_ttm', 1)
-    pe_now = d.get('pe_now', 20)
-    pe_tgt = d.get('pe_target', 20)
+    pe_now = d.get('pe_now', 20); pe_tgt = d.get('pe_target', 20)
     g = d.get('eps_cagr_fut', 10)/100
     
     # Proj 5 ans
     eps5 = eps0 * ((1+g)**5)
+    pe5 = pe_now + (pe_tgt - pe_now) 
     price5 = eps5 * pe_tgt
     
     divs = 0; cd = p0 * (d.get('div_yield',0)/100)
@@ -230,16 +233,26 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-t1, t2, t3, t4 = st.tabs(["PORTEFEUILLE", "ANALYSE GRAPHIQUE", "CLASSEMENT", "CONSEILS & STRATÉGIE"])
+# SIDEBAR
+with st.sidebar:
+    st.markdown("### 🧭 MENU")
+    page = st.radio("", ["PORTEFEUILLE", "ANALYSE GRAPHIQUE", "CLASSEMENT", "CONSEILS"], label_visibility="collapsed")
+    st.markdown("---")
+    if st.session_state.db:
+        tot = sum([d['price']*d['shares_owned'] for d in st.session_state.db.values()])
+        st.metric("Capital Total", format_euro(tot))
 
-# --- TAB 1 : PORTEFEUILLE ---
-with t1:
+# ==============================================================================
+# PAGE 1 : PORTEFEUILLE
+# ==============================================================================
+if page == "PORTEFEUILLE":
+    # 1. CAMEMBERT 3D
     if st.session_state.db:
         df = pd.DataFrame(st.session_state.db.values())
         df['total'] = df['price'] * df['shares_owned']
         
         if df['total'].sum() > 0:
-            c_v, c_c = st.columns([1, 3])
+            c_v, c_c = st.columns([1, 4])
             with c_v:
                 st.markdown("**Vue :**")
                 view = st.radio("", ["Positions", "Secteur", "Industrie"], label_visibility="collapsed")
@@ -260,22 +273,20 @@ with t1:
         with st.form("add"):
             c1, c2 = st.columns([3, 1])
             tk = c1.text_input("Ticker", placeholder="NVDA")
-            if c2.form_submit_button("CHERCHER", type="primary", use_container_width=True):
-                if tk:
-                    nd = fetch_data(tk.upper())
-                    if nd:
-                        st.session_state.db[nd['name']] = nd
-                        save_db(st.session_state.db)
-                        st.success("OK")
-                        st.rerun()
-                    else: st.error("Introuvable")
+            if c2.form_submit_button("CHERCHER"):
+                nd = fetch_data(tk.upper())
+                if nd:
+                    st.session_state.db[nd['name']] = nd
+                    save_db(st.session_state.db)
+                    st.success("OK")
+                    st.rerun()
+                else: st.error("Introuvable")
 
     if st.session_state.db:
         sel = st.selectbox("Modifier une ligne :", ["-- Sélectionner --"] + list(st.session_state.db.keys()))
         if sel != "-- Sélectionner --":
             d = st.session_state.db[sel]
             
-            # Header Action
             c_logo, c_nom = st.columns([1, 10])
             with c_logo: st.markdown(get_logo_html(d.get('domain'), 60), unsafe_allow_html=True)
             with c_nom: 
@@ -285,16 +296,25 @@ with t1:
                     save_db(st.session_state.db)
                     st.rerun()
 
-            c1, c2 = st.columns([1, 1])
+            c1, c2, c3 = st.columns(3)
             with c1:
                 st.markdown("##### 🌍 MARCHÉ (Yahoo)")
                 with st.container(border=True):
                     d['price'] = st.number_input("Prix", value=float(d.get('price',0)), step=0.5)
                     d['pe_now'] = st.number_input("PER Actuel", value=float(d.get('pe_now',0)), step=0.5)
-                    d['eps_cagr_fut'] = st.number_input("Croissance BPA Est. %", value=float(d.get('eps_cagr_fut',10)), step=0.5)
+                    d['eps_cagr_fut'] = st.number_input("Croiss. BPA Est. %", value=float(d.get('eps_cagr_fut',10)), step=0.5)
                     d['shares_owned'] = st.number_input("Qté Détenue", value=float(d.get('shares_owned',0)), step=1.0)
 
             with c2:
+                st.markdown("##### 📈 FONDAMENTAUX")
+                d['op_margin'] = st.number_input("Marge Op %", value=float(d.get('op_margin',0)), step=0.5)
+                d['net_margin'] = st.number_input("Marge Nette %", value=float(d.get('net_margin',0)), step=0.5)
+                d['roic'] = st.number_input("ROIC %", value=float(d.get('roic',0)), step=0.5)
+                d['net_debt_ebitda'] = st.number_input("Dette/EBITDA", value=float(d.get('net_debt_ebitda',0)), step=0.1)
+                st.info("Autres")
+                d['rev_cagr_hist'] = st.number_input("Crois. CA Hist. %", value=float(d.get('rev_cagr_hist', 0)), step=0.5)
+
+            with c3:
                 # ZONE BLEUE (USER INPUTS)
                 st.markdown('<div class="blue-zone">', unsafe_allow_html=True)
                 st.markdown("<h5>💎 VOTRE ANALYSE</h5>", unsafe_allow_html=True)
@@ -303,19 +323,17 @@ with t1:
                 d['sc_fair_value'] = st.number_input("Fair Value (Juste Valeur)", value=float(d.get('sc_fair_value',0)), step=1.0)
                 st.markdown('</div>', unsafe_allow_html=True)
 
-            # Hidden fields management (stockés mais pas affichés pour simplifier)
-            # ... (On garde les valeurs existantes)
-
-            col_s, col_d = st.columns([4, 1])
-            if col_s.button("💾 ENREGISTRER", type="primary", use_container_width=True):
+            if st.button("💾 ENREGISTRER"):
                 st.session_state.db[sel] = d
                 save_db(st.session_state.db)
                 st.toast("Sauvegardé")
-            if col_d.button("🗑️"):
+            if st.button("🗑️"):
                 del st.session_state.db[sel]; save_db(st.session_state.db); st.rerun()
 
-# --- TAB 2 : ANALYSE ---
-with t2:
+# ==============================================================================
+# PAGE 2 : ANALYSE & RENDEMENT
+# ==============================================================================
+elif page == "ANALYSE GRAPHIQUE":
     if not st.session_state.db: st.warning("Ajoutez une action.")
     else:
         c_sel, c_tax = st.columns([2, 1])
@@ -382,84 +400,44 @@ with t2:
         fig.update_layout(paper_bgcolor='white', plot_bgcolor='white', height=500, hovermode="x unified", legend=dict(orientation="h", y=1.1))
         st.plotly_chart(fig, use_container_width=True)
 
-# --- TAB 3 : CLASSEMENT ---
-with t3:
+# ==============================================================================
+# PAGE 3 : CLASSEMENT
+# ==============================================================================
+elif page == "CLASSEMENT":
     if not st.session_state.db: st.info("Aucune donnée.")
     else:
         st.markdown("<br>", unsafe_allow_html=True)
         ranked = []
         for n, d in st.session_state.db.items(): ranked.append((n, get_score(d), d))
         ranked.sort(key=lambda x: x[1], reverse=True)
-        
         for n, s, d in ranked:
             c = get_color(s)
-            st.markdown(f"""
-            <div class="score-row" style="border-left: 5px solid {c};">
-                <div class="s-left">{get_logo_html(d.get('domain'), 40)}<span style="font-size:18px; font-weight:700;">{n}</span></div>
-                <div class="s-mid">
-                    <div style="text-align:center;"><span class="sc-label">PER</span><br><span class="sc-val">{d.get('pe_now'):.1f}x</span></div>
-                    <div style="text-align:center;"><span class="sc-label">Croiss.</span><br><span class="sc-val">{d.get('eps_cagr_fut'):.1f}%</span></div>
-                    <div style="text-align:center;"><span class="sc-label">Moat</span><br><span class="sc-val">{d.get('moat_score'):.0f}/9</span></div>
-                </div>
-                <div class="s-right"><div class="score-badge" style="background:{c};">{s}</div></div>
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown(f"""<div class="score-row" style="border-left: 5px solid {c};"><div class="s-left">{get_logo_html(d.get('domain'), 40)}<span style="font-size:18px; font-weight:700;">{n}</span></div><div class="s-mid"><div style="text-align:center;"><span class="sc-label">PER</span><br><span class="sc-val">{d.get('pe_now'):.1f}x</span></div><div style="text-align:center;"><span class="sc-label">Croiss.</span><br><span class="sc-val">{d.get('eps_cagr_fut'):.1f}%</span></div></div><div class="s-right"><div class="score-badge" style="background:{c};">{s}</div></div></div>""", unsafe_allow_html=True)
 
 # ==============================================================================
-# TAB 4 : CONSEILS & STRATÉGIE
+# PAGE 4 : CONSEILS (STRATÉGIE)
 # ==============================================================================
-with t4:
+elif page == "CONSEILS":
     if not st.session_state.db:
         st.info("Ajoutez des actions pour obtenir des conseils.")
     else:
-        st.markdown("### 🧭 CONSEIL STRATÉGIQUE AUTOMATIQUE")
-        st.caption("Basé sur le Score Qualité (/20) et le Rendement Net Estimé.")
+        st.markdown("### 🧭 STRATÉGIE AUTOMATIQUE")
         
-        buy_list = []
-        hold_list = []
-        sell_list = []
-        
+        buy, hold, sell = [], [], []
         for n, d in st.session_state.db.items():
             s = get_score(d)
             c = calc_cagr_net(d)
-            
-            # Algorithme de décision
-            if s >= 15 or c >= 15:
-                buy_list.append((n, s, c))
-            elif s >= 12 or c >= 10:
-                hold_list.append((n, s, c))
-            else:
-                sell_list.append((n, s, c))
+            if s >= 15 or c >= 15: buy.append((n,s,c))
+            elif s >= 12 or c >= 10: hold.append((n,s,c))
+            else: sell.append((n,s,c))
         
-        # COLONNES CONSEILS
-        col_buy, col_hold, col_sell = st.columns(3)
-        
-        with col_buy:
-            st.markdown(f"<div style='background:#DCFCE7; padding:10px; border-radius:8px; color:#166534; font-weight:bold; text-align:center; border:1px solid #86EFAC;'>💎 ACHAT FORT / RENFORCER ({len(buy_list)})</div>", unsafe_allow_html=True)
-            for n, s, c in buy_list:
-                st.markdown(f"""
-                <div class="advice-card" style="border-left: 5px solid #10B981;">
-                    <div class="advice-header"><span class="advice-title">{n}</span> <span class="advice-badge" style="background:#10B981;">BUY</span></div>
-                    <div class="advice-metrics">Note: {s}/20 • CAGR: {c:.1f}%</div>
-                </div>
-                """, unsafe_allow_html=True)
-                
-        with col_hold:
-            st.markdown(f"<div style='background:#FEF9C3; padding:10px; border-radius:8px; color:#854D0E; font-weight:bold; text-align:center; border:1px solid #FDE047;'>🛡️ CONSERVER / DCA ({len(hold_list)})</div>", unsafe_allow_html=True)
-            for n, s, c in hold_list:
-                st.markdown(f"""
-                <div class="advice-card" style="border-left: 5px solid #F59E0B;">
-                    <div class="advice-header"><span class="advice-title">{n}</span> <span class="advice-badge" style="background:#F59E0B;">HOLD</span></div>
-                    <div class="advice-metrics">Note: {s}/20 • CAGR: {c:.1f}%</div>
-                </div>
-                """, unsafe_allow_html=True)
-
-        with col_sell:
-            st.markdown(f"<div style='background:#FEE2E2; padding:10px; border-radius:8px; color:#991B1B; font-weight:bold; text-align:center; border:1px solid #FCA5A5;'>⚠️ À SURVEILLER / ALLÉGER ({len(sell_list)})</div>", unsafe_allow_html=True)
-            for n, s, c in sell_list:
-                st.markdown(f"""
-                <div class="advice-card" style="border-left: 5px solid #EF4444;">
-                    <div class="advice-header"><span class="advice-title">{n}</span> <span class="advice-badge" style="background:#EF4444;">SELL</span></div>
-                    <div class="advice-metrics">Note: {s}/20 • CAGR: {c:.1f}%</div>
-                </div>
-                """, unsafe_allow_html=True)
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.markdown(f"<div style='background:#DCFCE7; padding:10px; border-radius:8px; color:#166534; font-weight:bold; text-align:center; margin-bottom:10px;'>💎 ACHAT FORT ({len(buy)})</div>", unsafe_allow_html=True)
+            for n,s,c in buy: st.markdown(f"<div class='advice-card' style='border-left:5px solid #10B981;'><b>{n}</b><br><span style='font-size:12px'>Note: {s}/20 • TRI: {c:.1f}%</span></div>", unsafe_allow_html=True)
+        with c2:
+            st.markdown(f"<div style='background:#FEF9C3; padding:10px; border-radius:8px; color:#854D0E; font-weight:bold; text-align:center; margin-bottom:10px;'>🛡️ CONSERVER ({len(hold)})</div>", unsafe_allow_html=True)
+            for n,s,c in hold: st.markdown(f"<div class='advice-card' style='border-left:5px solid #F59E0B;'><b>{n}</b><br><span style='font-size:12px'>Note: {s}/20 • TRI: {c:.1f}%</span></div>", unsafe_allow_html=True)
+        with c3:
+            st.markdown(f"<div style='background:#FEE2E2; padding:10px; border-radius:8px; color:#991B1B; font-weight:bold; text-align:center; margin-bottom:10px;'>⚠️ VENDRE ({len(sell)})</div>", unsafe_allow_html=True)
+            for n,s,c in sell: st.markdown(f"<div class='advice-card' style='border-left:5px solid #EF4444;'><b>{n}</b><br><span style='font-size:12px'>Note: {s}/20 • TRI: {c:.1f}%</span></div>", unsafe_allow_html=True)
