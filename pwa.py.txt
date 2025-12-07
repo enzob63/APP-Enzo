@@ -1,4 +1,7 @@
+from pwa import inject_pwa
 import streamlit as st
+
+st.markdown(inject_pwa(), unsafe_allow_html=True)
 
 def inject_pwa():
     st.markdown("""
@@ -27,3 +30,4 @@ def inject_pwa():
     }
     </script>
     """
+
