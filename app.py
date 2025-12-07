@@ -1,274 +1,465 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
 import json
 import os
+import numpy as np
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+from streamlit_echarts import st_echarts
+import yfinance as yf
+from datetime import datetime
 
-# --- CONFIGURATION DE LA PAGE ---
-st.set_page_config(page_title="Valuator Pro", layout="wide", page_icon="📈")
+# ==============================================================================
+# 1. CONFIGURATION & STYLE SYSTEM V32
+# ==============================================================================
+st.set_page_config(page_title="AppEnzo V32", layout="wide", page_icon="🐰")
 
-# --- GESTION DES DONNÉES (PERSISTANCE JSON) ---
-DATA_FILE = "portfolio_data.json"
+# LOGO SVG (Lapin Couronné)
+SVG_LOGO = """
+<svg width="80" height="80" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="gold" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" style="stop-color:#FCD34D;stop-opacity:1"/><stop offset="100%" style="stop-color:#B45309;stop-opacity:1"/></linearGradient>
+  </defs>
+  <circle cx="50" cy="50" r="45" fill="#FFFFFF" stroke="url(#gold)" stroke-width="3"/>
+  <path d="M35 55 Q30 20 40 15 Q50 25 45 55" fill="#E2E8F0" stroke="#334155" stroke-width="1.5"/>
+  <path d="M65 55 Q70 20 60 15 Q50 25 55 55" fill="#E2E8F0" stroke="#334155" stroke-width="1.5"/>
+  <circle cx="50" cy="65" r="22" fill="#F8FAFC" stroke="#334155" stroke-width="1.5"/>
+  <path d="M35 40 L35 25 L42 35 L50 20 L58 35 L65 25 L65 40 Z" fill="url(#gold)" stroke="#B45309" stroke-width="1"/>
+  <circle cx="43" cy="62" r="2" fill="#334155"/>
+  <circle cx="57" cy="62" r="2" fill="#334155"/>
+  <path d="M46 70 Q50 75 54 70" fill="none" stroke="#334155" stroke-width="1.5"/>
+</svg>
+"""
 
-def load_data():
+st.markdown("""
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Libre+Baskerville:wght@700&display=swap');
+
+    .stApp { background-color: #FFFFFF; font-family: 'Cambria', serif; color: #0F172A; }
+    
+    /* EN-TÊTE FIXE */
+    .main-header {
+        display: flex; align-items: center; justify-content: center; gap: 20px;
+        background: #F8FAFC; padding: 20px; border-bottom: 3px solid #D4AF37;
+        margin-bottom: 30px; border-radius: 0 0 20px 20px;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+    }
+    .header-title {
+        font-family: 'Libre Baskerville', serif; font-size: 50px; font-weight: 900;
+        background: -webkit-linear-gradient(45deg, #1e3a8a, #d4af37);
+        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        margin: 0; text-transform: uppercase;
+    }
+
+    /* INPUTS */
+    .stTextInput>div>div>input, .stNumberInput>div>div>input, .stSelectbox>div>div>div {
+        background-color: #F8FAFC !important; border: 1px solid #CBD5E1 !important;
+        color: #0F172A !important; font-family: 'Cambria', serif !important; border-radius: 6px;
+    }
+
+    /* ZONE BLEUE (USER TOTAL) */
+    .blue-zone {
+        background-color: #EFF6FF; /* Bleu très clair */
+        border: 2px solid #3B82F6; /* Bleu vif */
+        border-radius: 12px;
+        padding: 20px;
+        margin-top: 10px;
+    }
+    .blue-zone h5 { color: #1E40AF !important; font-weight: bold; text-transform: uppercase; }
+    .blue-zone .stNumberInput>div>div>input {
+        background-color: #FFFFFF !important; border: 1px solid #93C5FD !important;
+    }
+
+    /* BUTTONS */
+    div.stButton > button:first-child {
+        background-color: #0F172A; color: white; border-radius: 8px; border: none; font-weight: bold;
+    }
+    div.stButton > button:first-child:hover { background-color: #1E293B; }
+
+    /* RENDEMENT */
+    .yield-display { font-size: 70px; font-weight: 900; text-align: center; margin: 0; line-height: 1; font-family: 'Arial', sans-serif !important; }
+    .col-green { color: #10B981; } .col-orange { color: #F59E0B; } .col-red { color: #EF4444; }
+
+    /* CARTE CONSEIL (TAB 4) */
+    .advice-card {
+        background: white; border: 1px solid #E2E8F0; border-radius: 12px; padding: 20px; margin-bottom: 15px;
+        border-left: 8px solid #CCC; box-shadow: 0 4px 6px rgba(0,0,0,0.02);
+    }
+    .advice-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+    .advice-title { font-size: 20px; font-weight: 800; color: #0F172A; }
+    .advice-metrics { font-size: 14px; color: #64748B; font-weight: 600; }
+    .advice-badge { padding: 5px 12px; border-radius: 20px; color: white; font-weight: bold; font-size: 12px; text-transform: uppercase; }
+    
+    /* SCORE CARD (TAB 3) */
+    .score-row {
+        display: flex; align-items: center; justify-content: space-between;
+        background: white; border-bottom: 1px solid #E2E8F0; padding: 12px 20px; height: 85px;
+    }
+    .score-badge { 
+        font-size: 22px; font-weight: 800; color: white; width: 70px; height: 45px; 
+        display: flex; align-items: center; justify-content: center; border-radius: 8px; 
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# ==============================================================================
+# 2. DATA ENGINE (CORRIGÉ : MULTI-LIGNES)
+# ==============================================================================
+DATA_FILE = "appenzo_v32.json"
+
+def load_db():
     if not os.path.exists(DATA_FILE):
         return {}
-    with open(DATA_FILE, "r") as f:
-        return json.load(f)
+    try:
+        with open(DATA_FILE, "r") as f:
+            return json.load(f)
+    except:
+        return {}
 
-def save_data(data):
+def save_db(data):
     with open(DATA_FILE, "w") as f:
         json.dump(data, f, indent=4)
 
-data = load_data()
+if 'db' not in st.session_state:
+    st.session_state.db = load_db()
 
-# --- LOGIQUE MÉTIER (ALGORITHMES) ---
-
-def calculate_g_prudent(g_brut):
-    """
-    Applique le filtre de sécurité sur la croissance.
-    """
-    g_brut_percent = g_brut * 100
-    
-    if g_brut_percent <= 15:
-        coeff = 0.90
-    elif g_brut_percent > 60:
-        coeff = 0.50
-    else:
-        # Zone de freinage : baisse de 0.025 tous les 2.5% au-dessus de 15%
-        steps = (g_brut_percent - 15) / 2.5
-        coeff = 0.90 - (int(steps) * 0.025)
-        # Sécurité pour ne pas descendre sous 0.50 si le calcul mathématique le faisait
-        coeff = max(0.50, coeff)
+def fetch_data(ticker):
+    try:
+        stock = yf.Ticker(ticker)
+        info = stock.info
+        hist = stock.history(period="5y")
         
-    return g_brut * coeff, coeff
+        cagr_p = 10.0
+        if not hist.empty:
+            p5 = hist['Close'].iloc[0]
+            p0 = hist['Close'].iloc[-1]
+            if p5 > 0:
+                cagr_p = ((p0/p5)**(1/5)-1)*100
 
-def get_pe_coefficient(pe_base):
-    """
-    Retourne le coefficient réducteur selon la grille de gravité.
-    """
-    if pe_base < 15: return 1.0
-    if 15 <= pe_base < 25: return 0.90
-    if 25 <= pe_base < 30: return 0.85
-    if 30 <= pe_base < 35: return 0.825
-    if 35 <= pe_base < 40: return 0.80
-    if 40 <= pe_base < 45: return 0.775
-    if 45 <= pe_base < 50: return 0.75
-    if 50 <= pe_base < 55: return 0.725
-    if 55 <= pe_base < 60: return 0.70
-    if 60 <= pe_base < 65: return 0.65
-    if pe_base >= 65: return 0.60
-    return 1.0
-
-def run_simulation(vals, horizon, tax_mode):
-    """
-    Exécute les 5 étapes de l'algorithme.
-    """
-    results = {}
-    logs = []
-
-    # 1. Mécanismes de Sécurité - Croissance
-    g_est = vals.get('growth_est', 0) / 100
-    g_prudent, g_coeff = calculate_g_prudent(g_est)
-    results['g_prudent'] = g_prudent
-    logs.append(f"🛡️ **Croissance** : Estimée {g_est:.1%} → Ajustée **{g_prudent:.1%}** (Coeff {g_coeff:.3f})")
-
-    # 2. Mécanismes de Sécurité - PER Cible (Double Verrou)
-    pe_10 = vals.get('pe_10y', 15)
-    pe_5 = vals.get('pe_5y', 15)
-    pe_base = min(pe_10, pe_5)
-    pe_coeff = get_pe_coefficient(pe_base)
-    pe_target = pe_base * pe_coeff
-    results['pe_target'] = pe_target
-    logs.append(f"🔒 **PER Cible** : Base {pe_base:.1f} (min 5y/10y) x Coeff {pe_coeff} = **{pe_target:.1f}**")
-
-    # 3. Projection EPS et Prix
-    eps_current = vals.get('eps_ttm', 1)
-    eps_final = eps_current * ((1 + g_prudent) ** horizon)
-    price_final = eps_final * pe_target
-    current_price = vals.get('price', 100)
-    
-    # CAGR Brut (Capital Gain uniquement)
-    if current_price > 0:
-        cagr_brut_price = (price_final / current_price) ** (1 / horizon) - 1
-    else:
-        cagr_brut_price = 0
-        
-    logs.append(f"📈 **Projection Prix** : EPS {eps_current:.2f} → {eps_final:.2f}. Prix {current_price} → **{price_final:.2f}**")
-
-    # 4. Dividendes (Approximation simplifiée : cumulés et réinvestis implicitement ou simple somme pour le rendement total)
-    # Note : Pour un calcul de CAGR Total précis, on additionne souvent la valeur finale du prix + dividendes cumulés.
-    div_yield = vals.get('div_yield', 0) / 100
-    div_growth = vals.get('div_growth', 0) / 100
-    
-    current_div = current_price * div_yield
-    total_dividends = 0
-    # Simulation année par année pour les dividendes
-    for i in range(1, horizon + 1):
-        # Le dividende croit au rythme g_div
-        d = current_div * ((1 + div_growth) ** i)
-        total_dividends += d
-    
-    value_final_gross = price_final + total_dividends
-    total_gain_gross = value_final_gross - current_price
-
-    # 5. Fiscalité
-    tax_coeff = 0.828 if tax_mode == "PEA" else 0.70
-    
-    # On applique la taxe sur la plus-value totale (PV Prix + Dividendes)
-    # Note: Dans la réalité c'est plus complexe (div taxés au fil de l'eau en CTO), 
-    # mais ici on suit la logique "Rendement final intègre l'impôt" en fin de course.
-    if total_gain_gross > 0:
-        net_gain = total_gain_gross * tax_coeff
-    else:
-        net_gain = total_gain_gross # Pas d'impôt sur les moins-values, on garde la perte brute
-        
-    value_final_net = current_price + net_gain
-    
-    if current_price > 0 and value_final_net > 0:
-        cagr_net = (value_final_net / current_price) ** (1 / horizon) - 1
-    else:
-        cagr_net = -1 # Perte totale ou erreur
-
-    results['cagr_net'] = cagr_net
-    results['value_final_net'] = value_final_net
-    results['logs'] = logs
-    
-    return results
-
-# --- INTERFACE UTILISATEUR ---
-
-st.title("🛡️ Analyseur de Valeur & Sécurité")
-
-# SIDEBAR : SÉLECTION ENTREPRISE
-st.sidebar.header("Portefeuille")
-company_names = list(data.keys())
-selected_company = st.sidebar.selectbox("Choisir une entreprise", ["Nouvelle Entreprise"] + company_names)
-
-if selected_company == "Nouvelle Entreprise":
-    ticker_input = st.sidebar.text_input("Nom / Ticker de l'entreprise")
-    if st.sidebar.button("Créer") and ticker_input:
-        data[ticker_input] = {} # Init empty
-        save_data(data)
-        st.rerun()
-    active_company_key = None
-else:
-    active_company_key = selected_company
-
-# MAIN CONTENT
-if active_company_key:
-    comp_data = data[active_company_key]
-    
-    st.header(f"Analyse : {active_company_key}")
-    
-    col1, col2 = st.columns([1, 1])
-
-    with col1:
-        st.subheader("1. Données de Marché & Historiques")
-        with st.container(border=True):
-            new_price = st.number_input("Prix Actuel (€/$)", value=comp_data.get('price', 100.0))
-            new_eps = st.number_input("EPS TTM (Bénéfice par action)", value=comp_data.get('eps_ttm', 5.0))
-            
-            c1, c2 = st.columns(2)
-            new_pe_5y = c1.number_input("PER Moyen 5 ans", value=comp_data.get('pe_5y', 20.0))
-            new_pe_10y = c2.number_input("PER Médian 10 ans", value=comp_data.get('pe_10y', 18.0))
-            
-            st.divider()
-            st.caption("Estimations Analystes")
-            new_growth_est = st.number_input("Croissance EPS estimée (CAGR %)", value=comp_data.get('growth_est', 10.0), help="g brut")
-            
-            c3, c4 = st.columns(2)
-            new_div_yield = c3.number_input("Rendement Div Actuel (%)", value=comp_data.get('div_yield', 2.0))
-            new_div_growth = c4.number_input("Croissance Div estimée (%)", value=comp_data.get('div_growth', 5.0))
-
-    with col2:
-        st.subheader("2. Scoring Achat (Indicateurs)")
-        with st.container(border=True):
-            # Partie A du prompt
-            sc_per_ttm = st.number_input("PER TTM", value=comp_data.get('sc_per_ttm', 0.0))
-            sc_per_avg4 = st.number_input("PER Moyen / 4 ans", value=comp_data.get('sc_per_avg4', 0.0))
-            st.divider()
-            sc_peg_ttm = st.number_input("PEG TTM", value=comp_data.get('sc_peg_ttm', 0.0))
-            sc_peg_avg4 = st.number_input("PEG Moyen / 4 ans", value=comp_data.get('sc_peg_avg4', 0.0))
-            st.divider()
-            sc_fair_value = st.number_input("Fair Value (GF/Finbox)", value=comp_data.get('sc_fair_value', 0.0))
-            
-            # Calcul automatique de la marge de sécu sur fair value
-            if sc_fair_value > 0 and new_price > 0:
-                upside = (sc_fair_value - new_price) / new_price
-                color = "green" if upside > 0 else "red"
-                st.markdown(f"Marge de sécurité (Fair Value) : :{color}[**{upside:.1%}**]")
-
-    # Sauvegarde automatique des entrées
-    if st.button("💾 Sauvegarder les données"):
-        data[active_company_key] = {
-            'price': new_price, 'eps_ttm': new_eps,
-            'pe_5y': new_pe_5y, 'pe_10y': new_pe_10y,
-            'growth_est': new_growth_est,
-            'div_yield': new_div_yield, 'div_growth': new_div_growth,
-            'sc_per_ttm': sc_per_ttm, 'sc_per_avg4': sc_per_avg4,
-            'sc_peg_ttm': sc_peg_ttm, 'sc_peg_avg4': sc_peg_avg4,
-            'sc_fair_value': sc_fair_value
+        data = {
+            'name': info.get('shortName', ticker),
+            'domain': info.get('website', '').replace('https://www.', '').split('/')[0],
+            'sector': info.get('sector', 'Indéfini'),
+            'industry': info.get('industry', 'Indéfini'),
+            'price': info.get('currentPrice', 0.0),
+            'eps_ttm': info.get('trailingEps', 0.0),
+            'pe_now': info.get('trailingPE', 0.0),
+            'div_yield': (info.get('dividendYield', 0) or 0)*100,
+            'rev_cagr_hist': (info.get('revenueGrowth', 0) or 0)*100,
+            'rev_cagr_fut': (info.get('earningsGrowth', 0) or 0)*100,
+            'eps_cagr_hist': cagr_p,
+            'eps_cagr_fut': (info.get('earningsGrowth', 0) or 0)*100,
+            'op_margin': (info.get('operatingMargins', 0) or 0)*100,
+            'net_margin': (info.get('profitMargins', 0) or 0)*100,
+            'roic': (info.get('returnOnEquity', 0) or 0)*100,
+            'net_debt_ebitda': info.get('debtToEquity', 0)/100,
+            # User defaults
+            'cash_conv': 20.0, 'moat_score': 5.0,
+            'pe_target': info.get('forwardPE', 20.0),
+            'shares_owned': 0.0, 'sc_fair_value': 0.0
         }
-        save_data(data)
-        st.success("Données mises à jour !")
+        for k,v in data.items(): 
+            if v is None: data[k] = 0.0
+        return data
+    except: return None
 
-    st.markdown("---")
+def get_logo_html(domain, size=40):
+    if not domain: return ""
+    return f'<img src="https://www.google.com/s2/favicons?domain={domain}&sz=128" style="width:{size}px; height:{size}px; border-radius:8px;">'
+
+def format_euro(n):
+    if n>=1e9: return f"{n/1e9:.2f} Md€"
+    if n>=1e6: return f"{n/1e6:.2f} M€"
+    return f"{n:,.0f} €".replace(",", " ")
+
+# ==============================================================================
+# 3. MOTEUR NOTATION & CAGR
+# ==============================================================================
+def get_score(d):
+    p = 0
+    # Growth
+    for k in ['rev_cagr_hist', 'rev_cagr_fut', 'eps_cagr_hist', 'eps_cagr_fut']:
+        v = d.get(k, 0)
+        if v > 13: p+=2
+        elif 10<=v<=12.99: p+=1.5
+        elif 8<=v<10: p+=1
+    # Quality
+    if d.get('op_margin',0)>=25: p+=1
+    if d.get('net_margin',0)>=20: p+=1
+    if d.get('roic',0)>=20 and d.get('net_debt_ebitda',0)<=1 and d.get('cash_conv',0)>=20: p+=1
+    p += d.get('moat_score',0)
+    return min(p, 20)
+
+def calc_cagr_net(d):
+    p0 = d.get('price', 100)
+    if p0 <= 0: return 0
+    eps0 = d.get('eps_ttm', 1)
+    pe_now = d.get('pe_now', 20)
+    pe_tgt = d.get('pe_target', 20)
+    g = d.get('eps_cagr_fut', 10)/100
     
-    # SECTION SIMULATION
-    st.header("3. Simulateur de Rendement (Algorithme Sécurisé)")
+    # Proj 5 ans
+    eps5 = eps0 * ((1+g)**5)
+    price5 = eps5 * pe_tgt
     
-    sim_col1, sim_col2 = st.columns([1, 2])
+    divs = 0; cd = p0 * (d.get('div_yield',0)/100)
+    for _ in range(5): cd*=(1+g); divs+=cd
     
-    with sim_col1:
-        st.markdown("#### Paramètres")
-        horizon = st.slider("Horizon (années)", 3, 10, 5)
-        tax_mode = st.radio("Enveloppe Fiscale", ["PEA (17.2%)", "CTO (30%)"])
-        tax_code = "PEA" if "PEA" in tax_mode else "CTO"
+    # Flat Tax 30% par défaut pour le tri
+    gain = (price5 + divs) - p0
+    net = gain * 0.70
+    total = p0 + net
+    cagr = ((total/p0)**(1/5)-1)
+    return cagr * 100
+
+def get_color(s):
+    if s>=16: return "#10B981"
+    if s>=13: return "#84CC16"
+    if s>=10: return "#F59E0B"
+    return "#EF4444"
+
+# ==============================================================================
+# 4. APPLICATION
+# ==============================================================================
+
+# HEADER ROBUSTE HTML
+st.markdown(f"""
+<div class="main-header">
+    {SVG_LOGO}
+    <h1 class="header-title">APP ENZO</h1>
+</div>
+""", unsafe_allow_html=True)
+
+t1, t2, t3, t4 = st.tabs(["PORTEFEUILLE", "ANALYSE GRAPHIQUE", "CLASSEMENT", "CONSEILS & STRATÉGIE"])
+
+# --- TAB 1 : PORTEFEUILLE ---
+with t1:
+    if st.session_state.db:
+        df = pd.DataFrame(st.session_state.db.values())
+        df['total'] = df['price'] * df['shares_owned']
         
-        if st.button("🚀 Lancer la Simulation", type="primary"):
-            # Prepare data dict for sim
-            sim_inputs = {
-                'growth_est': new_growth_est,
-                'pe_10y': new_pe_10y, 'pe_5y': new_pe_5y,
-                'eps_ttm': new_eps, 'price': new_price,
-                'div_yield': new_div_yield, 'div_growth': new_div_growth
-            }
+        if df['total'].sum() > 0:
+            c_v, c_c = st.columns([1, 3])
+            with c_v:
+                st.markdown("**Vue :**")
+                view = st.radio("", ["Positions", "Secteur", "Industrie"], label_visibility="collapsed")
+                col_map = {"Positions": "name", "Secteur": "sector", "Industrie": "industry"}
+            with c_c:
+                pie_df = df.groupby(col_map[view])['total'].sum().reset_index()
+                pdata = [{"value": r['total'], "name": r[col_map[view]]} for i, r in pie_df.iterrows()]
+                opt = {
+                    "tooltip": {"trigger": "item", "formatter": "{b}: {c}€ ({d}%)"},
+                    "legend": {"bottom": 0},
+                    "series": [{"type": "pie", "radius": [30, 110], "center": ["50%", "50%"], "roseType": "area", "itemStyle": {"borderRadius": 5}, "avoidLabelOverlap": True, "data": pdata}]
+                }
+                st_echarts(options=opt, height="300px")
+    
+    st.markdown("---")
+
+    with st.expander("➕ AJOUTER ACTION (Yahoo)", expanded=False):
+        with st.form("add"):
+            c1, c2 = st.columns([3, 1])
+            tk = c1.text_input("Ticker", placeholder="NVDA")
+            if c2.form_submit_button("CHERCHER", type="primary", use_container_width=True):
+                if tk:
+                    nd = fetch_data(tk.upper())
+                    if nd:
+                        st.session_state.db[nd['name']] = nd
+                        save_db(st.session_state.db)
+                        st.success("OK")
+                        st.rerun()
+                    else: st.error("Introuvable")
+
+    if st.session_state.db:
+        sel = st.selectbox("Modifier une ligne :", ["-- Sélectionner --"] + list(st.session_state.db.keys()))
+        if sel != "-- Sélectionner --":
+            d = st.session_state.db[sel]
             
-            res = run_simulation(sim_inputs, horizon, tax_code)
+            # Header Action
+            c_logo, c_nom = st.columns([1, 10])
+            with c_logo: st.markdown(get_logo_html(d.get('domain'), 60), unsafe_allow_html=True)
+            with c_nom: 
+                new_n = st.text_input("Nom", sel, label_visibility="collapsed")
+                if new_n != sel:
+                    st.session_state.db[new_n] = st.session_state.db.pop(sel)
+                    save_db(st.session_state.db)
+                    st.rerun()
+
+            c1, c2 = st.columns([1, 1])
+            with c1:
+                st.markdown("##### 🌍 MARCHÉ (Yahoo)")
+                with st.container(border=True):
+                    d['price'] = st.number_input("Prix", value=float(d.get('price',0)), step=0.5)
+                    d['pe_now'] = st.number_input("PER Actuel", value=float(d.get('pe_now',0)), step=0.5)
+                    d['eps_cagr_fut'] = st.number_input("Croissance BPA Est. %", value=float(d.get('eps_cagr_fut',10)), step=0.5)
+                    d['shares_owned'] = st.number_input("Qté Détenue", value=float(d.get('shares_owned',0)), step=1.0)
+
+            with c2:
+                # ZONE BLEUE (USER INPUTS)
+                st.markdown('<div class="blue-zone">', unsafe_allow_html=True)
+                st.markdown("<h5>💎 VOTRE ANALYSE</h5>", unsafe_allow_html=True)
+                d['moat_score'] = st.number_input("Score Moat (0-9)", value=float(d.get('moat_score',5)), min_value=0.0, max_value=9.0, step=1.0)
+                d['pe_target'] = st.number_input("PER Cible (Sortie)", value=float(d.get('pe_target',20)), step=1.0)
+                d['sc_fair_value'] = st.number_input("Fair Value (Juste Valeur)", value=float(d.get('sc_fair_value',0)), step=1.0)
+                st.markdown('</div>', unsafe_allow_html=True)
+
+            # Hidden fields management (stockés mais pas affichés pour simplifier)
+            # ... (On garde les valeurs existantes)
+
+            col_s, col_d = st.columns([4, 1])
+            if col_s.button("💾 ENREGISTRER", type="primary", use_container_width=True):
+                st.session_state.db[sel] = d
+                save_db(st.session_state.db)
+                st.toast("Sauvegardé")
+            if col_d.button("🗑️"):
+                del st.session_state.db[sel]; save_db(st.session_state.db); st.rerun()
+
+# --- TAB 2 : ANALYSE ---
+with t2:
+    if not st.session_state.db: st.warning("Ajoutez une action.")
+    else:
+        c_sel, c_tax = st.columns([2, 1])
+        target = c_sel.selectbox("Action :", list(st.session_state.db.keys()))
+        tax = c_tax.selectbox("Fiscalité :", ["Compte-Titres (30%)", "PEA (17.2%)", "Brut (0%)"])
+        
+        dat = st.session_state.db[target]
+        
+        # SYNC AUTO
+        if 'last_t' not in st.session_state or st.session_state.last_t != target:
+            st.session_state.sim_g = float(dat.get('eps_cagr_fut', 10.0))
+            st.session_state.sim_pe = float(dat.get('pe_target', 20.0))
+            st.session_state.last_t = target
+
+        cc1, cc2 = st.columns(2)
+        with cc1: st.session_state.sim_g = st.slider("Croissance Future (%)", 0.0, 50.0, value=st.session_state.sim_g, step=0.5, key="sg")
+        with cc2: st.session_state.sim_pe = st.slider("PER Cible", 5.0, 100.0, value=st.session_state.sim_pe, step=0.5, key="spe")
+
+        # JAUGE FAIR VALUE
+        fv = dat.get('sc_fair_value', 0); curr = dat.get('price', 0)
+        if fv > 0 and curr > 0:
+            diff = (fv - curr) / curr
+            fig_g = go.Figure(go.Indicator(
+                mode = "gauge+number+delta", value = curr,
+                domain = {'x': [0, 1], 'y': [0, 1]},
+                title = {'text': f"Prix ({curr}€) vs Fair Value ({fv}€)", 'font': {'size': 16, 'family': 'Cambria'}},
+                delta = {'reference': fv, 'relative': True, 'valueformat': '.1%', 'increasing': {'color': "#EF4444"}, 'decreasing': {'color': "#10B981"}},
+                gauge = {'axis': {'range': [0, max(fv, curr)*1.4]}, 'bar': {'color': "#0F172A"}, 'threshold': {'line': {'color': "blue", 'width': 3}, 'thickness': 0.8, 'value': fv}}
+            ))
+            fig_g.update_layout(height=180, margin=dict(t=30, b=10))
+            st.plotly_chart(fig_g, use_container_width=True)
+
+        # CALC & GRAPH
+        p0 = dat.get('price', 100); eps0 = dat.get('eps_ttm', 5); hist_g = dat.get('eps_cagr_hist', 10.0)/100
+        y_h = [2020, 2021, 2022, 2023, 2024]; y_f = [2025, 2026, 2027, 2028, 2029, 2030]
+        ph, eh = [], []; cp, ce = p0, eps0
+        for _ in range(5): cp/=(1+hist_g); ce/=(1+hist_g); ph.append(cp); eh.append(ce)
+        ph.reverse(); eh.reverse()
+        pf, ef = [p0], [eps0]; pe0 = dat.get('pe_now', 20)
+        for i in range(1, 6):
+            ne = eps0*((1+st.session_state.sim_g/100)**i); npe = pe0 + (st.session_state.sim_pe - pe0)*(i/5)
+            pf.append(ne*npe); ef.append(ne)
             
-            with sim_col2:
-                st.markdown("#### Résultats")
+        divs = 0; cd = p0*(dat.get('div_yield',0)/100)
+        for i in range(5): cd*=(1+st.session_state.sim_g/100); divs+=cd
+        
+        brut = (pf[-1]+divs)-p0; tx = 0.30 if "30%" in tax else (0.172 if "17.2%" in tax else 0.0)
+        net = brut*(1-tx)
+        final = p0 + net
+        cagr = ((final/p0)**(1/5)-1) if p0>0 else 0
+        
+        cls = "col-red"
+        if cagr>0.12: cls = "col-green"
+        elif cagr>=0.10: cls = "col-orange"
+        
+        st.markdown(f"<div style='text-align:center; font-weight:bold; margin-top:20px; color:#64748B;'>RENDEMENT NET ANNUEL ESTIMÉ</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='yield-display {cls}'>{cagr:.1%} / an</div>", unsafe_allow_html=True)
+
+        fig = make_subplots(specs=[[{"secondary_y": True}]])
+        fig.add_trace(go.Scatter(x=y_h+[2025], y=ph+[p0], name="Prix Hist", line=dict(color='#9CA3AF', width=2)), secondary_y=False)
+        fig.add_trace(go.Scatter(x=y_f, y=pf, name="Prix Proj", line=dict(color='#10B981', width=4), fill='tozeroy', fillcolor='rgba(16, 185, 129, 0.1)'), secondary_y=False)
+        fig.add_trace(go.Scatter(x=y_h+y_f, y=eh+ef, name="EPS", line=dict(color='#2563EB', width=2, dash='dot')), secondary_y=True)
+        fig.add_vline(x=2025, line_width=2, line_dash="solid", line_color="#333")
+        fig.update_layout(paper_bgcolor='white', plot_bgcolor='white', height=500, hovermode="x unified", legend=dict(orientation="h", y=1.1))
+        st.plotly_chart(fig, use_container_width=True)
+
+# --- TAB 3 : CLASSEMENT ---
+with t3:
+    if not st.session_state.db: st.info("Aucune donnée.")
+    else:
+        st.markdown("<br>", unsafe_allow_html=True)
+        ranked = []
+        for n, d in st.session_state.db.items(): ranked.append((n, get_score(d), d))
+        ranked.sort(key=lambda x: x[1], reverse=True)
+        
+        for n, s, d in ranked:
+            c = get_color(s)
+            st.markdown(f"""
+            <div class="score-row" style="border-left: 5px solid {c};">
+                <div class="s-left">{get_logo_html(d.get('domain'), 40)}<span style="font-size:18px; font-weight:700;">{n}</span></div>
+                <div class="s-mid">
+                    <div style="text-align:center;"><span class="sc-label">PER</span><br><span class="sc-val">{d.get('pe_now'):.1f}x</span></div>
+                    <div style="text-align:center;"><span class="sc-label">Croiss.</span><br><span class="sc-val">{d.get('eps_cagr_fut'):.1f}%</span></div>
+                    <div style="text-align:center;"><span class="sc-label">Moat</span><br><span class="sc-val">{d.get('moat_score'):.0f}/9</span></div>
+                </div>
+                <div class="s-right"><div class="score-badge" style="background:{c};">{s}</div></div>
+            </div>
+            """, unsafe_allow_html=True)
+
+# ==============================================================================
+# TAB 4 : CONSEILS & STRATÉGIE
+# ==============================================================================
+with t4:
+    if not st.session_state.db:
+        st.info("Ajoutez des actions pour obtenir des conseils.")
+    else:
+        st.markdown("### 🧭 CONSEIL STRATÉGIQUE AUTOMATIQUE")
+        st.caption("Basé sur le Score Qualité (/20) et le Rendement Net Estimé.")
+        
+        buy_list = []
+        hold_list = []
+        sell_list = []
+        
+        for n, d in st.session_state.db.items():
+            s = get_score(d)
+            c = calc_cagr_net(d)
+            
+            # Algorithme de décision
+            if s >= 15 or c >= 15:
+                buy_list.append((n, s, c))
+            elif s >= 12 or c >= 10:
+                hold_list.append((n, s, c))
+            else:
+                sell_list.append((n, s, c))
+        
+        # COLONNES CONSEILS
+        col_buy, col_hold, col_sell = st.columns(3)
+        
+        with col_buy:
+            st.markdown(f"<div style='background:#DCFCE7; padding:10px; border-radius:8px; color:#166534; font-weight:bold; text-align:center; border:1px solid #86EFAC;'>💎 ACHAT FORT / RENFORCER ({len(buy_list)})</div>", unsafe_allow_html=True)
+            for n, s, c in buy_list:
+                st.markdown(f"""
+                <div class="advice-card" style="border-left: 5px solid #10B981;">
+                    <div class="advice-header"><span class="advice-title">{n}</span> <span class="advice-badge" style="background:#10B981;">BUY</span></div>
+                    <div class="advice-metrics">Note: {s}/20 • CAGR: {c:.1f}%</div>
+                </div>
+                """, unsafe_allow_html=True)
                 
-                # Affichage du CAGR NET FINAL
-                cagr = res['cagr_net']
-                color_metric = "normal"
-                if cagr > 0.15: color_metric = "off" # Streamlit trick for green usually, or use custom HTML
-                
-                st.metric(label="CAGR TOTAL NET (après impôts & sécurité)", value=f"{cagr:.2%}", delta=f"Horizon {horizon} ans")
-                
-                if cagr >= 0.15:
-                    st.success("🎯 Objectif > 15% atteint ! Opportunité potentielle.")
-                elif cagr >= 0.10:
-                    st.warning("⚠️ Rendement correct mais sous 15%.")
-                else:
-                    st.error("❌ Rendement insuffisant selon les critères de sécurité.")
+        with col_hold:
+            st.markdown(f"<div style='background:#FEF9C3; padding:10px; border-radius:8px; color:#854D0E; font-weight:bold; text-align:center; border:1px solid #FDE047;'>🛡️ CONSERVER / DCA ({len(hold_list)})</div>", unsafe_allow_html=True)
+            for n, s, c in hold_list:
+                st.markdown(f"""
+                <div class="advice-card" style="border-left: 5px solid #F59E0B;">
+                    <div class="advice-header"><span class="advice-title">{n}</span> <span class="advice-badge" style="background:#F59E0B;">HOLD</span></div>
+                    <div class="advice-metrics">Note: {s}/20 • CAGR: {c:.1f}%</div>
+                </div>
+                """, unsafe_allow_html=True)
 
-                with st.expander("🔍 Voir le détail du calcul (Les 5 Étapes)"):
-                    for log in res['logs']:
-                        st.markdown(f"- {log}")
-                    st.markdown(f"- 💰 **Dividendes & Fiscalité** : Rendement net calculé via {tax_code}.")
-                    st.markdown(f"- **Valeur Finale Nette** estimée : {res['value_final_net']:.2f}")
-
-else:
-    st.info("👈 Sélectionnez une entreprise dans le menu ou créez-en une nouvelle pour commencer.")
-
-    # Vue tableau global
-    if data:
-        st.markdown("### Vue d'ensemble")
-        df = pd.DataFrame.from_dict(data, orient='index')
-        # On sélectionne quelques colonnes clés pour l'affichage tableau
-        cols_to_show = ['price', 'sc_fair_value', 'growth_est', 'pe_5y']
-        existing_cols = [c for c in cols_to_show if c in df.columns]
-
-        st.dataframe(df[existing_cols])
+        with col_sell:
+            st.markdown(f"<div style='background:#FEE2E2; padding:10px; border-radius:8px; color:#991B1B; font-weight:bold; text-align:center; border:1px solid #FCA5A5;'>⚠️ À SURVEILLER / ALLÉGER ({len(sell_list)})</div>", unsafe_allow_html=True)
+            for n, s, c in sell_list:
+                st.markdown(f"""
+                <div class="advice-card" style="border-left: 5px solid #EF4444;">
+                    <div class="advice-header"><span class="advice-title">{n}</span> <span class="advice-badge" style="background:#EF4444;">SELL</span></div>
+                    <div class="advice-metrics">Note: {s}/20 • CAGR: {c:.1f}%</div>
+                </div>
+                """, unsafe_allow_html=True)
