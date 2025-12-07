@@ -9,3 +9,21 @@ def inject_pwa():
         }
     </script>
     """, unsafe_allow_html=True)
+
+# pwa.py
+def inject_pwa():
+    # injecte manifest + enregistrement du service worker
+    return """
+    <link rel="manifest" href="/manifest.txt">
+    <script>
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function() {
+            navigator.serviceWorker.register('/service-worker.txt').then(function(reg) {
+                // registration succeeded
+            }).catch(function(error) {
+                // registration failed
+            });
+        });
+    }
+    </script>
+    """
